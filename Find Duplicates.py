@@ -91,23 +91,23 @@ def find_matches(df, threshold=80):
             matches.append(pd.DataFrame(group).drop_duplicates())
     return matches
 
-def evaluate_internal(groups):
-    total_error = 0
-    count = 0
+def evaluate_similarity(groups, field='name_norm'):
+    total_similarity = 0
+    total_pairs = 0
     for group in groups:
-        if len(group) < 2:
+        values = group[field].dropna().tolist()
+        n = len(values)
+        if n < 2:
             continue
-        if group['domain'].notnull().all():
-            key_field = 'domain'
-        else:
-            key_field = 'phone_norm'
-        mode_val = group[key_field].mode().iloc[0] if not group[key_field].mode().empty else None
-        mismatches = group[group[key_field] != mode_val]
-        error_rate = len(mismatches) / len(group)
-        total_error += error_rate
-        count += 1
-    avg_error = total_error / count if count > 0 else 0
-    return avg_error
+        # Comparați toate perechile din grup
+        for i in range(n):
+            for j in range(i+1, n):
+                sim = fuzz.token_sort_ratio(values[i], values[j])
+                total_similarity += sim
+                total_pairs += 1
+    avg_similarity = total_similarity / total_pairs if total_pairs > 0 else 0
+    return avg_similarity
+
 
 df = pd.read_parquet(input_file)
 df = preprocess_data(df)
@@ -121,5 +121,5 @@ for i, group in enumerate(groups):
         print("-" * 80)
 
 
-avg_error = evaluate_internal(groups)
-print(f"\nInternal Evaluation: Mean error of the groups: {avg_error*100:.2f}%")
+avg_similarity = evaluate_similarity(groups, field='name_norm')
+print(f"\nInternal Evaluation: Mean similarity of names in groups: {avg_similarity:.2f}%")
