@@ -6,16 +6,15 @@ import tkinter as tk
 from tkinter import filedialog
 from tqdm import tqdm
 
-# Inițializare Tkinter
 root = tk.Tk()
 root.withdraw()
 
 input_file = filedialog.askopenfilename(
-    title="Selectează fișierul Parquet",
+    title="Select Parquet file",
     filetypes=[("Parquet files", "*.parquet")]
 )
 if not input_file:
-    print("Nu a fost selectat niciun fișier. Scriptul se încheie.")
+    print("No file selected. Closing...")
     exit()
 
 def normalize_domain(urls):
@@ -63,7 +62,7 @@ def preprocess_data(df):
 def find_matches(df, threshold=80):
     matches = []
     clustered = set()
-    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Procesare duplicate"):
+    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Finding duplicates"):
         if idx in clustered:
             continue
         group = []
@@ -92,28 +91,35 @@ def find_matches(df, threshold=80):
             matches.append(pd.DataFrame(group).drop_duplicates())
     return matches
 
-def evaluate_duplicates(groups, df):
-    total_records = len(df)
-    duplicate_indices = set()
+def evaluate_internal(groups):
+    total_error = 0
+    count = 0
     for group in groups:
-        duplicate_indices.update(group.index)
-    total_duplicates = len(duplicate_indices)
-    total_groups = len(groups)
-    print("\nEvaluare rezultate duplicate:")
-    print(f"Total înregistrări: {total_records}")
-    print(f"Total grupuri duplicate: {total_groups}")
-    print(f"Total înregistrări duplicate (unice): {total_duplicates}")
-    print(f"Procentaj duplicate: {total_duplicates / total_records * 100:.2f}%")
-
+        if len(group) < 2:
+            continue
+        if group['domain'].notnull().all():
+            key_field = 'domain'
+        else:
+            key_field = 'phone_norm'
+        mode_val = group[key_field].mode().iloc[0] if not group[key_field].mode().empty else None
+        mismatches = group[group[key_field] != mode_val]
+        error_rate = len(mismatches) / len(group)
+        total_error += error_rate
+        count += 1
+    avg_error = total_error / count if count > 0 else 0
+    return avg_error
 
 df = pd.read_parquet(input_file)
 df = preprocess_data(df)
 groups = find_matches(df, threshold=80)
-evaluate_duplicates(groups, df)
 
 
 for i, group in enumerate(groups):
     if len(group) > 1:
-        print(f"\nGrup {i + 1} ({len(group)} duplicate):")
+        print(f"\nGrup {i + 1} ({len(group)} duplicates):")
         print(group[['company_name', 'website_domain', 'primary_phone']])
         print("-" * 80)
+
+
+avg_error = evaluate_internal(groups)
+print(f"\nInternal Evaluation: Mean error of the groups: {avg_error*100:.2f}%")
