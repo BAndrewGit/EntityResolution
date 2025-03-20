@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import filedialog
 from tqdm import tqdm
 
+
 root = tk.Tk()
 root.withdraw()
 
@@ -17,6 +18,7 @@ if not input_file:
     print("No file selected. Closing...")
     exit()
 
+
 def normalize_domain(urls):
     result = []
     for url in urls:
@@ -27,12 +29,14 @@ def normalize_domain(urls):
         result.append(f"{extracted.domain}.{extracted.suffix}".lower())
     return pd.Series(result, index=urls.index)
 
+
 def normalize_names(names):
     suffixes = {"ltd", "inc", "llc", "gmbh", "pty", "plc", "co", "corp"}
     names = names.str.lower().str.strip().fillna('')
     for suffix in suffixes:
         names = names.str.replace(fr'\b{suffix}\b,?', '', regex=True)
     return names.str.strip()
+
 
 def normalize_phones(phones):
     def _normalize(phone):
@@ -52,12 +56,39 @@ def preprocess_data(df):
     df['phone_norm'] = normalize_phones(df['primary_phone'])
     address_cols = ['main_street', 'main_street_number', 'main_city', 'main_postcode', 'main_country']
     df[address_cols] = df[address_cols].fillna('').astype(str)
-    df['address_norm'] = (df[address_cols[0]] + ' ' +
-                          df[address_cols[1]] + ' ' +
-                          df[address_cols[2]] + ' ' +
-                          df[address_cols[3]] + ' ' +
-                          df[address_cols[4]]).str.lower().str.strip()
+    df['address_norm'] = df[address_cols].agg(' '.join, axis=1).str.lower().str.strip()
+
     return df
+
+
+def match_by_domain(current, df):
+    domain_mask = df['domain'] == current['domain']
+    domain_group = df[domain_mask]
+    group_records = domain_group.to_dict('records')
+    idxs = set(domain_group.index.tolist())
+    return group_records, idxs
+
+
+def match_by_phone(current, df, threshold):
+    phone_group = df[df['phone_norm'] == current['phone_norm']]
+    if phone_group.empty:
+        return [], set()
+    names = phone_group['name_norm'].tolist()
+    results = process.extract(
+        current['name_norm'], names,
+        scorer=fuzz.token_sort_ratio,
+        score_cutoff=threshold
+    )
+    group_records = []
+    idxs = set()
+    for _, score, res_idx in results:
+        if score >= threshold:
+            match_idx = phone_group.index[res_idx]
+            if match_idx not in idxs:
+                group_records.append(df.loc[match_idx].to_dict())
+                idxs.add(match_idx)
+    return group_records, idxs
+
 
 def find_matches(df, threshold=80):
     matches = []
@@ -65,31 +96,16 @@ def find_matches(df, threshold=80):
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="Finding duplicates"):
         if idx in clustered:
             continue
-        group = []
         current = row.to_dict()
         if current['domain']:
-            domain_mask = df['domain'] == current['domain']
-            domain_group = df[domain_mask]
-            group.extend(domain_group.to_dict('records'))
-            clustered.update(domain_group.index.tolist())
+            group, idxs = match_by_domain(current, df)
         else:
-            phone_group = df[df['phone_norm'] == current['phone_norm']]
-            if not phone_group.empty:
-                names = phone_group['name_norm'].tolist()
-                results = process.extract(
-                    current['name_norm'], names,
-                    scorer=fuzz.token_sort_ratio,
-                    score_cutoff=threshold
-                )
-                for _, score, res_idx in results:
-                    if score >= threshold:
-                        match_idx = phone_group.index[res_idx]
-                        if match_idx not in clustered:
-                            group.append(df.loc[match_idx].to_dict())
-                            clustered.add(match_idx)
+            group, idxs = match_by_phone(current, df, threshold)
         if group:
+            clustered.update(idxs)
             matches.append(pd.DataFrame(group).drop_duplicates())
     return matches
+
 
 def evaluate_similarity(groups, field='name_norm'):
     total_similarity = 0
@@ -99,14 +115,14 @@ def evaluate_similarity(groups, field='name_norm'):
         n = len(values)
         if n < 2:
             continue
-        # Comparați toate perechile din grup
         for i in range(n):
-            for j in range(i+1, n):
+            for j in range(i + 1, n):
                 sim = fuzz.token_sort_ratio(values[i], values[j])
                 total_similarity += sim
                 total_pairs += 1
     avg_similarity = total_similarity / total_pairs if total_pairs > 0 else 0
     return avg_similarity
+
 
 
 df = pd.read_parquet(input_file)
@@ -116,7 +132,7 @@ groups = find_matches(df, threshold=80)
 
 for i, group in enumerate(groups):
     if len(group) > 1:
-        print(f"\nGrup {i + 1} ({len(group)} duplicates):")
+        print(f"\nGroup {i + 1} ({len(group)} duplicates):")
         print(group[['company_name', 'website_domain', 'primary_phone']])
         print("-" * 80)
 
