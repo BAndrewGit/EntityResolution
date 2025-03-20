@@ -8,62 +8,71 @@ from tkinter import filedialog
 root = tk.Tk()
 root.withdraw()
 
-input_file = filedialog.askopenfilename(title="Selectează fișierul Parquet", filetypes=[("Parquet files", "*.parquet")])
+
+input_file = filedialog.askopenfilename(
+    title="Select the Parquet file",
+    filetypes=[("Parquet files", "*.parquet")]
+)
 if not input_file:
-    print("Nu a fost selectat niciun fișier. Scriptul se încheie.")
+    print("No file selected. Exiting script.")
     exit()
 
 
 df = pd.read_parquet(input_file)
 
 
-print("Informații despre dataset:")
+print("Dataset Information:")
 print(df.info())
-print("\nStatistici descriptive:")
+print("\nDescriptive Statistics:")
 print(df.describe(include='all'))
 
 
-columns_to_analyze = ['company_name', 'website_domain', 'primary_phone', 'main_country']
-for col in columns_to_analyze:
+for col in ['main_country', 'main_city']:
     if col in df.columns:
-        print(f"\nTop 10 valori pentru coloana '{col}':")
+        print(f"\nTop 10 values for column '{col}':")
         print(df[col].value_counts().head(10))
 
 
+sns.set_theme(style="whitegrid")
+
+
 if 'main_country' in df.columns:
-    plt.figure(figsize=(10,6))
+    plt.figure(figsize=(10, 6))
     country_counts = df['main_country'].value_counts(dropna=True)
     top_n = 10
     top_countries = country_counts.head(top_n)
     others_count = country_counts.iloc[top_n:].sum()
     if others_count > 0:
-        top_countries['Altele'] = others_count
-    sns.barplot(x=top_countries.index, y=top_countries.values, palette="viridis")
+        top_countries['Others'] = others_count
+    sns.barplot(x=top_countries.index, y=top_countries.values, palette="mako")
     plt.xticks(rotation=45)
-    plt.title("Distribuția înregistrărilor pe țări (Top 10 + Altele)")
-    plt.xlabel("Țară")
-    plt.ylabel("Număr înregistrări")
+    plt.title("Distribution of Records by Region (Top 10 + Others)", fontsize=14)
+    plt.xlabel("Country/Region", fontsize=12)
+    plt.ylabel("Number of Records", fontsize=12)
     plt.tight_layout()
     plt.show()
 
 
-if 'website_domain' in df.columns:
-    plt.figure(figsize=(10,6))
-    df['domain_length'] = df['website_domain'].apply(lambda x: len(str(x)) if pd.notna(x) else 0)
-    sns.histplot(df['domain_length'], bins=30, kde=True, color="teal")
-    plt.title("Distribuția lungimii domeniilor web")
-    plt.xlabel("Lungimea domeniului")
-    plt.ylabel("Frecvență")
-    plt.tight_layout()
-    plt.show()
+missing = df.isnull().mean() * 100
+missing = missing.sort_values(ascending=False)
+top_missing = missing.head(10)
+plt.figure(figsize=(8, 6))
+top_missing.plot(kind='barh', color='salmon')
+plt.xlabel('Missing Percentage (%)', fontsize=12)
+plt.title('Top 10 Columns with Highest Missing Values', fontsize=14)
+plt.gca().invert_yaxis()
+plt.tight_layout()
+plt.show()
 
 
-if 'company_name' in df.columns:
-    plt.figure(figsize=(10,6))
-    df['name_length'] = df['company_name'].apply(lambda x: len(str(x)) if pd.notna(x) else 0)
-    sns.histplot(df['name_length'], bins=30, kde=True, color="coral")
-    plt.title("Distribuția lungimii numelor de companii")
-    plt.xlabel("Lungimea numelui")
-    plt.ylabel("Frecvență")
+if 'main_country' in df.columns and 'main_city' in df.columns:
+    top_country = df['main_country'].value_counts().idxmax()
+    df_top = df[df['main_country'] == top_country]
+    plt.figure(figsize=(10, 6))
+    city_counts = df_top['main_city'].value_counts(dropna=True).head(10)
+    sns.barplot(x=city_counts.values, y=city_counts.index, palette="coolwarm")
+    plt.title(f"Top 10 Cities in {top_country}", fontsize=14)
+    plt.xlabel("Number of Records", fontsize=12)
+    plt.ylabel("City", fontsize=12)
     plt.tight_layout()
     plt.show()
